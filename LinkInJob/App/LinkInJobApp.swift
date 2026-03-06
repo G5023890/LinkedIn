@@ -11,6 +11,14 @@ struct LinkInJobApp: App {
                 .environmentObject(viewModel)
         }
         .commands {
+            CommandMenu("Actions") {
+                Button("Archive Selected") {
+                    viewModel.archiveSelectedItem()
+                }
+                .keyboardShortcut("d", modifiers: .command)
+                .disabled(viewModel.selectedItem == nil)
+            }
+
             CommandMenu("Tools") {
                 Button("Запустить Sync сейчас") {
                     Task {

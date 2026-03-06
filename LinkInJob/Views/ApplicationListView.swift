@@ -6,68 +6,115 @@ struct ApplicationListView: View {
     @FocusState private var focus: FocusTarget?
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
+        ScrollViewReader { proxy in
+            ZStack {
+                Color(nsColor: .windowBackgroundColor)
 
-            Divider()
+                VStack(spacing: 0) {
+                    header
 
-            List(selection: $viewModel.selectedItemID) {
-                ForEach(viewModel.filteredApplications) { item in
-                    ApplicationRowView(
-                        item: item,
-                        isSelected: viewModel.selectedItemID == item.id,
-                        toggleStar: { viewModel.toggleStar(for: item) }
-                    )
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                    .contextMenu {
-                        Menu("Set Stage") {
-                            ForEach(Stage.allCases, id: \.self) { stage in
-                                Button(stage.title) {
-                                    viewModel.setStage(stage, for: item)
+                    if viewModel.filteredApplications.isEmpty {
+                        ContentUnavailableView(
+                            "No applications",
+                            systemImage: "tray",
+                            description: Text(emptyStateMessage)
+                        )
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            focus = nil
+                        }
+                    } else {
+                        ScrollView {
+                            VStack(spacing: 4) {
+                                ForEach(viewModel.filteredApplications) { item in
+                                    ApplicationRowView(
+                                        item: item,
+                                        isSelected: viewModel.selectedItemID == item.id,
+                                        toggleStar: { viewModel.toggleStar(for: item) }
+                                    )
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .contentShape(Rectangle())
+                                    .contextMenu {
+                                        Menu("Set Stage") {
+                                            ForEach(Stage.allCases, id: \.self) { stage in
+                                                Button(stage.title) {
+                                                    viewModel.setStage(stage, for: item)
+                                                }
+                                            }
+                                        }
+
+                                        if item.jobURL != nil {
+                                            Button("Open Job Link") {
+                                                viewModel.openJobLink(for: item)
+                                            }
+                                        }
+
+                                        Button("Open Source File") {
+                                            viewModel.openSourceFile(for: item)
+                                        }
+
+                                        Button(item.starred ? "Unstar" : "Toggle Star") {
+                                            viewModel.toggleStar(for: item)
+                                        }
+
+                                        Button("Reset to Auto") {
+                                            viewModel.resetToAuto(for: item)
+                                        }
+                                    }
+                                    .onTapGesture {
+                                        viewModel.selectedItemID = item.id
+                                        focus = nil
+                                    }
+                                    .onTapGesture(count: 2) {
+                                        viewModel.selectedItemID = item.id
+                                        focus = nil
+                                        if item.jobURL != nil {
+                                            viewModel.openJobLink(for: item)
+                                        } else {
+                                            viewModel.openSourceFile(for: item)
+                                        }
+                                    }
+                                    .padding(.horizontal, 10)
+                                    .id(item.id)
                                 }
                             }
+                            .padding(.vertical, 8)
+                            .frame(maxWidth: .infinity, alignment: .topLeading)
                         }
-
-                        if item.jobURL != nil {
-                            Button("Open Job Link") {
-                                viewModel.openJobLink(for: item)
-                            }
-                        }
-
-                        Button("Open Source File") {
-                            viewModel.openSourceFile(for: item)
-                        }
-
-                        Button(item.starred ? "Unstar" : "Toggle Star") {
-                            viewModel.toggleStar(for: item)
-                        }
-
-                        Button("Reset to Auto") {
-                            viewModel.resetToAuto(for: item)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            focus = nil
                         }
                     }
-                    .onTapGesture {
-                        viewModel.selectedItemID = item.id
-                        focus = .jobsList
-                    }
-                    .onTapGesture(count: 2) {
-                        viewModel.selectedItemID = item.id
-                        focus = .jobsList
-                        if item.jobURL != nil {
-                            viewModel.openJobLink(for: item)
-                        } else {
-                            viewModel.openSourceFile(for: item)
-                        }
-                    }
-                    .padding(.vertical, 2)
-                    .listRowInsets(EdgeInsets(top: 2, leading: 10, bottom: 2, trailing: 10))
-                    .listRowSeparator(.hidden)
-                    .tag(item.id)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .background(
+                    KeyCaptureView(isEnabled: focus != .searchField) { event in
+                        switch event {
+                        case .upArrow:
+                            viewModel.selectPreviousInFilteredList()
+                        case .downArrow:
+                            viewModel.selectNextInFilteredList()
+                        case .letter(let char):
+                            viewModel.handleListHotkey(String(char))
+                        case .returnKey:
+                            guard let item = viewModel.selectedItem else { return }
+                            if item.jobURL != nil {
+                                viewModel.openJobLink(for: item)
+                            } else {
+                                viewModel.openSourceFile(for: item)
+                            }
+                        case .space:
+                            guard let item = viewModel.selectedItem else { return }
+                            viewModel.openSourceFile(for: item)
+                        }
+                    }
+                    .allowsHitTesting(false)
+                )
             }
-            .listStyle(.plain)
-            .focused($focus, equals: .jobsList)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .navigationTitle("Applications")
             .onMoveCommand { direction in
                 switch direction {
                 case .up:
@@ -78,44 +125,20 @@ struct ApplicationListView: View {
                     break
                 }
             }
-            .simultaneousGesture(
-                TapGesture().onEnded {
-                    focus = .jobsList
-                }
-            )
-            .scrollContentBackground(.hidden)
-            .background(Color(nsColor: .windowBackgroundColor))
-            .background(
-                KeyCaptureView(isEnabled: focus == .jobsList) { event in
-                    switch event {
-                    case .letter(let char):
-                        viewModel.handleListHotkey(String(char))
-                    case .returnKey:
-                        guard let item = viewModel.selectedItem else { return }
-                        if item.jobURL != nil {
-                            viewModel.openJobLink(for: item)
-                        } else {
-                            viewModel.openSourceFile(for: item)
-                        }
-                    case .space:
-                        guard let item = viewModel.selectedItem else { return }
-                        viewModel.openSourceFile(for: item)
-                    }
-                }
-                .allowsHitTesting(false)
-            )
-        }
-        .navigationTitle("Applications")
-        .onAppear {
-            viewModel.ensureSelectionVisibleInFilteredList()
-            focus = .jobsList
-        }
-        .onChange(of: viewModel.filteredApplications.map(\.id)) { _, _ in
-            viewModel.ensureSelectionVisibleInFilteredList()
-        }
-        .onChange(of: viewModel.selectedItemID) { _, newValue in
-            let selectedText = newValue?.uuidString ?? "nil"
-            print("[Selection] selectedItemID=\(selectedText)")
+            .onAppear {
+                viewModel.ensureSelectionVisibleInFilteredList()
+                focus = nil
+                scrollSelectionIfNeeded(with: proxy, animated: false)
+            }
+            .onChange(of: viewModel.filteredApplications.map(\.id)) { _, _ in
+                viewModel.ensureSelectionVisibleInFilteredList()
+                scrollSelectionIfNeeded(with: proxy, animated: false)
+            }
+            .onChange(of: viewModel.selectedItemID) { _, newValue in
+                let selectedText = newValue?.uuidString ?? "nil"
+                print("[Selection] selectedItemID=\(selectedText)")
+                scrollSelectionIfNeeded(with: proxy)
+            }
         }
     }
 
@@ -146,9 +169,40 @@ struct ApplicationListView: View {
             .hidden()
         }
     }
+
+    private func scrollSelectionIfNeeded(with proxy: ScrollViewProxy, animated: Bool = true) {
+        guard let selectedID = viewModel.selectedItemID else { return }
+        let action = {
+            proxy.scrollTo(selectedID, anchor: .center)
+        }
+        if animated {
+            withAnimation(.easeInOut(duration: 0.12)) {
+                action()
+            }
+        } else {
+            action()
+        }
+    }
+
+    private var emptyStateMessage: String {
+        if !viewModel.searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "No matches for the current search."
+        }
+
+        switch viewModel.sidebarFilter {
+        case .stage(let stage):
+            return "No applications in \(stage.title)."
+        case .starred:
+            return "No starred applications."
+        case .noReply:
+            return "No follow-up items right now."
+        }
+    }
 }
 
 private enum KeyAction {
+    case upArrow
+    case downArrow
     case letter(Character)
     case returnKey
     case space
@@ -200,6 +254,12 @@ private struct KeyCaptureView: NSViewRepresentable {
                 }
 
                 switch event.keyCode {
+                case 125:
+                    self.onKeyAction(.downArrow)
+                    return nil
+                case 126:
+                    self.onKeyAction(.upArrow)
+                    return nil
                 case 36:
                     self.onKeyAction(.returnKey)
                     return nil

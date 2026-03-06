@@ -51,6 +51,7 @@ final class AppViewModel: ObservableObject {
     }
 
     enum TranslationMethod: String, CaseIterable, Identifiable {
+        case manualOnly = "manual_only"
         case googleUnofficial = "google_unofficial"
         case googleAPI = "google_api"
 
@@ -58,6 +59,8 @@ final class AppViewModel: ObservableObject {
 
         var title: String {
             switch self {
+            case .manualOnly:
+                return "Только ручной перевод по запросу"
             case .googleUnofficial:
                 return "Google Web (gtx)"
             case .googleAPI:
@@ -449,7 +452,7 @@ finally:
 
     func translateDescriptionToRussian(for item: ApplicationItem) {
         guard !translatingDescriptionIDs.contains(item.id) else { return }
-        if translationMethod == .googleAPI && !hasGoogleTranslateAPIKey {
+        if effectiveManualTranslationMethod == .googleAPI && !hasGoogleTranslateAPIKey {
             syncStatusText = "Для Google Cloud API укажите ключ в Tools"
             return
         }
@@ -542,7 +545,7 @@ finally:
                 launchPath: "/usr/bin/python3",
                 arguments: ["-c", script],
                 currentDirectory: projectRootDirectory,
-                additionalEnvironment: translationEnvironment()
+                additionalEnvironment: translationEnvironment(forManualTranslation: true)
             )
 
             translatingDescriptionIDs.remove(item.id)
@@ -587,6 +590,11 @@ finally:
         default:
             break
         }
+    }
+
+    func archiveSelectedItem() {
+        guard let item = selectedItem else { return }
+        setStage(.archive, for: item)
     }
 
     func moveSelectionInFilteredList(by offset: Int) {
@@ -687,8 +695,19 @@ finally:
         return (translated, error)
     }
 
-    private func translationEnvironment() -> [String: String] {
-        var env: [String: String] = ["LINKINJOB_TRANSLATE_PROVIDER": translationMethod.rawValue]
+    private var effectiveManualTranslationMethod: TranslationMethod {
+        if translationMethod == .manualOnly {
+            return hasGoogleTranslateAPIKey ? .googleAPI : .googleUnofficial
+        }
+        return translationMethod
+    }
+
+    private func translationEnvironment(forManualTranslation: Bool = false) -> [String: String] {
+        let provider = forManualTranslation ? effectiveManualTranslationMethod : translationMethod
+        var env: [String: String] = [
+            "LINKINJOB_TRANSLATE_PROVIDER": provider.rawValue,
+            "LINKEDIN_TRANSLATE_TO_RU": (forManualTranslation || translationMethod != .manualOnly) ? "1" : "0"
+        ]
         if !googleTranslateAPIKey.isEmpty {
             env["LINKINJOB_GOOGLE_TRANSLATE_API_KEY"] = googleTranslateAPIKey
         }

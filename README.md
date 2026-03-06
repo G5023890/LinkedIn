@@ -4,7 +4,7 @@ This repository provides tools to parse LinkedIn/job emails, sync TXT archives, 
 
 ## Release
 
-Current release: `0.9.2`
+Current release: `0.9.3`
 
 ## What This Repository Contains
 
