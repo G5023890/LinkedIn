@@ -6,7 +6,7 @@ struct PythonBridge {
         if let envPath = ProcessInfo.processInfo.environment["LINKEDIN_APPS_DB"], !envPath.isEmpty {
             return envPath
         }
-        return (NSHomeDirectory() as NSString).appendingPathComponent(".local/share/linkedin_apps/applications.db")
+        return (NSHomeDirectory() as NSString).appendingPathComponent("Library/Application Support/LinkInJob/applications.db")
     }()
 
     func fetchApplications() async throws -> [ApplicationItem] {

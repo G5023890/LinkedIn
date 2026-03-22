@@ -9,6 +9,7 @@ final class AppViewModel: ObservableObject {
     private static let translationMethodDefaultsKey = "app.translationMethod"
     private static let googleTranslateAPIKeyLegacyDefaultsKey = "app.googleTranslateAPIKey"
     private lazy var projectRootDirectory: String = Self.resolveProjectRootDirectory()
+    private lazy var databasePath: String = databaseFileURL().path
     private let keychainStore = KeychainStore(
         service: "com.grigorymordokhovich.LinkInJob",
         account: "google_translate_api_key"
@@ -112,6 +113,7 @@ final class AppViewModel: ObservableObject {
            let savedMethod = TranslationMethod(rawValue: rawMethod) {
             self.translationMethod = savedMethod
         }
+        ensurePrimaryDatabaseLocation()
         loadGoogleTranslateAPIKeyFromSecureStorage()
         self.selectedItemID = applications.first?.id
     }
@@ -194,8 +196,8 @@ from pathlib import Path
 sys.path.insert(0, '\(scriptsDirEscaped)')
 from linkedin_applications_gui_sql import ApplicationsDB
 source_dirs = [\(sourceDirLiteral)]
-db_path = str(Path.home() / '.local' / 'share' / 'linkedin_apps' / 'applications.db')
-manifest_path = Path.home() / 'Library' / 'Application Support' / 'LinkInJob' / 'sync_manifest.json'
+db_path = '\(pythonLiteral(databasePath))'
+manifest_path = Path('\(pythonLiteral(syncManifestFileURL().path))')
 
 def load_manifest(path: Path) -> dict[str, str]:
     if not path.exists():
@@ -486,7 +488,7 @@ from pathlib import Path
 sys.path.insert(0, '\(scriptsDirEscaped)')
 from linkedin_applications_gui_sql import ApplicationsDB
 
-db_path = str(Path.home() / '.local' / 'share' / 'linkedin_apps' / 'applications.db')
+db_path = '\(pythonLiteral(databasePath))'
 db = ApplicationsDB(db_path)
 source_text = base64.b64decode('\(sourceData)').decode('utf-8', errors='ignore')
 app_id = \(dbIDLiteral)
@@ -772,7 +774,7 @@ finally:
         let script = """
 import sqlite3
 from pathlib import Path
-db_path = str(Path.home() / '.local' / 'share' / 'linkedin_apps' / 'applications.db')
+db_path = '\(pythonLiteral(databasePath))'
 conn = sqlite3.connect(db_path)
 cur = conn.cursor()
 db_id = \(dbIDLiteral)
@@ -825,7 +827,7 @@ conn.close()
         let script = """
 import sqlite3
 from pathlib import Path
-db_path = str(Path.home() / '.local' / 'share' / 'linkedin_apps' / 'applications.db')
+db_path = '\(pythonLiteral(databasePath))'
 conn = sqlite3.connect(db_path)
 cur = conn.cursor()
 cols = [r[1] for r in cur.execute("PRAGMA table_info(applications)").fetchall()]
@@ -868,7 +870,7 @@ conn.close()
         let script = """
 import sqlite3
 from pathlib import Path
-db_path = str(Path.home() / '.local' / 'share' / 'linkedin_apps' / 'applications.db')
+db_path = '\(pythonLiteral(databasePath))'
 conn = sqlite3.connect(db_path)
 cur = conn.cursor()
 db_id = \(dbIDLiteral)
@@ -1098,11 +1100,7 @@ conn.close()
     }
 
     private func syncLogDirectoryURL() -> URL {
-        let home = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
-        let dir = home
-            .appendingPathComponent("Library", isDirectory: true)
-            .appendingPathComponent("Application Support", isDirectory: true)
-            .appendingPathComponent("LinkInJob", isDirectory: true)
+        let dir = appSupportDirectoryURL()
             .appendingPathComponent("Logs", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
@@ -1148,7 +1146,7 @@ conn.close()
         let script = """
 import sqlite3
 from pathlib import Path
-db_path = str(Path.home() / '.local' / 'share' / 'linkedin_apps' / 'applications.db')
+db_path = '\(pythonLiteral(databasePath))'
 conn = sqlite3.connect(db_path)
 cur = conn.cursor()
 cols = [r[1] for r in cur.execute("PRAGMA table_info(applications)").fetchall()]
@@ -1179,6 +1177,51 @@ conn.close()
         }
 
         return []
+    }
+
+    private func appSupportDirectoryURL() -> URL {
+        let dir = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+            .appendingPathComponent("Library", isDirectory: true)
+            .appendingPathComponent("Application Support", isDirectory: true)
+            .appendingPathComponent("LinkInJob", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    private func databaseFileURL() -> URL {
+        appSupportDirectoryURL().appendingPathComponent("applications.db")
+    }
+
+    private func legacyDatabaseFileURL() -> URL {
+        URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+            .appendingPathComponent(".local", isDirectory: true)
+            .appendingPathComponent("share", isDirectory: true)
+            .appendingPathComponent("linkedin_apps", isDirectory: true)
+            .appendingPathComponent("applications.db")
+    }
+
+    private func syncManifestFileURL() -> URL {
+        appSupportDirectoryURL().appendingPathComponent("sync_manifest.json")
+    }
+
+    private func ensurePrimaryDatabaseLocation() {
+        let fm = FileManager.default
+        let target = databaseFileURL()
+        let legacy = legacyDatabaseFileURL()
+        guard !fm.fileExists(atPath: target.path), fm.fileExists(atPath: legacy.path) else { return }
+
+        do {
+            try fm.createDirectory(at: appSupportDirectoryURL(), withIntermediateDirectories: true)
+            try fm.copyItem(at: legacy, to: target)
+        } catch {
+            syncStatusText = "Не удалось перенести базу в Application Support"
+        }
+    }
+
+    private func pythonLiteral(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "'", with: "\\'")
     }
 
     private static func resolveProjectRootDirectory() -> String {

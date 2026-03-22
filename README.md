@@ -44,7 +44,7 @@ python3 -m pip install PySide6
 - TXT email archive:  
   `$HOME/Library/Application Support/DriveCVSync/LinkedIn Archive`
 - Applications SQLite DB:  
-  `$HOME/.local/share/linkedin_apps/applications.db`
+  `$HOME/Library/Application Support/LinkInJob/applications.db`
 - Last sync log (LinkInJob):  
   `$HOME/Library/Application Support/LinkInJob/Logs/last_sync.log`
 

@@ -21,6 +21,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+GUI_IMPORT_ERROR: Exception | None = None
+GUI_AVAILABLE = False
+
 try:
     from PySide6.QtCore import Qt
     from PySide6.QtGui import QAction
@@ -43,11 +46,9 @@ try:
         QVBoxLayout,
         QWidget,
     )
+    GUI_AVAILABLE = True
 except Exception as exc:  # pragma: no cover
-    print("PySide6 is required for GUI mode.")
-    print("Install with: python3 -m pip install PySide6")
-    print(f"Import error: {exc}")
-    raise SystemExit(1)
+    GUI_IMPORT_ERROR = exc
 
 from update_linkedin_applications import (
     classify,
@@ -75,6 +76,7 @@ GOOGLE_TRANSLATE_API_KEY = (
     os.getenv("LINKINJOB_GOOGLE_TRANSLATE_API_KEY", "")
     or os.getenv("GOOGLE_TRANSLATE_API_KEY", "")
 ).strip()
+DEFAULT_DB_PATH = Path.home() / "Library" / "Application Support" / "LinkInJob" / "applications.db"
 
 
 @dataclass
@@ -1356,386 +1358,387 @@ class ApplicationsDB:
         self.conn.commit()
 
 
-class MainWindow(QMainWindow):
-    def __init__(self, db: ApplicationsDB, source_dir: Path) -> None:
-        super().__init__()
-        self.db = db
-        self.source_dir = source_dir
-        self.selected_app_id: Optional[int] = None
+if GUI_AVAILABLE:
+    class MainWindow(QMainWindow):
+        def __init__(self, db: ApplicationsDB, source_dir: Path) -> None:
+            super().__init__()
+            self.db = db
+            self.source_dir = source_dir
+            self.selected_app_id: Optional[int] = None
 
-        self.setWindowTitle("LinkInJob")
-        self.resize(1280, 800)
+            self.setWindowTitle("LinkInJob")
+            self.resize(1280, 800)
 
-        self._build_ui()
-        self.sync_source()
+            self._build_ui()
+            self.sync_source()
 
-    def _build_ui(self) -> None:
-        toolbar = QToolBar("Main")
-        toolbar.setMovable(False)
-        self.addToolBar(toolbar)
+        def _build_ui(self) -> None:
+            toolbar = QToolBar("Main")
+            toolbar.setMovable(False)
+            self.addToolBar(toolbar)
 
-        self.source_input = QLineEdit(str(self.source_dir))
-        self.source_input.setMinimumWidth(520)
-        toolbar.addWidget(QLabel("Data source: "))
-        toolbar.addWidget(self.source_input)
+            self.source_input = QLineEdit(str(self.source_dir))
+            self.source_input.setMinimumWidth(520)
+            toolbar.addWidget(QLabel("Data source: "))
+            toolbar.addWidget(self.source_input)
 
-        sync_btn = QAction("Sync", self)
-        sync_btn.triggered.connect(self.sync_source)
-        toolbar.addAction(sync_btn)
+            sync_btn = QAction("Sync", self)
+            sync_btn.triggered.connect(self.sync_source)
+            toolbar.addAction(sync_btn)
 
-        sync_drive_btn = QAction("Sync Drive + Sync DB", self)
-        sync_drive_btn.triggered.connect(self.sync_drive_and_source)
-        toolbar.addAction(sync_drive_btn)
+            sync_drive_btn = QAction("Sync Drive + Sync DB", self)
+            sync_drive_btn.triggered.connect(self.sync_drive_and_source)
+            toolbar.addAction(sync_drive_btn)
 
-        reload_btn = QAction("Reload", self)
-        reload_btn.triggered.connect(self.reload_tree)
-        toolbar.addAction(reload_btn)
+            reload_btn = QAction("Reload", self)
+            reload_btn.triggered.connect(self.reload_tree)
+            toolbar.addAction(reload_btn)
 
-        main = QWidget()
-        root_layout = QVBoxLayout(main)
-        root_layout.setContentsMargins(8, 8, 8, 8)
+            main = QWidget()
+            root_layout = QVBoxLayout(main)
+            root_layout.setContentsMargins(8, 8, 8, 8)
 
-        splitter = QSplitter(Qt.Horizontal)
-        root_layout.addWidget(splitter)
+            splitter = QSplitter(Qt.Horizontal)
+            root_layout.addWidget(splitter)
 
-        left_frame = QFrame()
-        left_layout = QVBoxLayout(left_frame)
-        left_layout.setContentsMargins(0, 0, 0, 0)
-        self.tree = QTreeWidget()
-        self.tree.setHeaderLabels(["Applications"])
-        self.tree.header().setStretchLastSection(False)
-        self.tree.header().setSectionResizeMode(0, QHeaderView.Interactive)
-        self.tree.setColumnWidth(0, 680)
-        self.tree.setMinimumWidth(640)
-        self.tree.itemSelectionChanged.connect(self.on_tree_selection)
-        left_layout.addWidget(self.tree)
-        left_frame.setMinimumWidth(640)
+            left_frame = QFrame()
+            left_layout = QVBoxLayout(left_frame)
+            left_layout.setContentsMargins(0, 0, 0, 0)
+            self.tree = QTreeWidget()
+            self.tree.setHeaderLabels(["Applications"])
+            self.tree.header().setStretchLastSection(False)
+            self.tree.header().setSectionResizeMode(0, QHeaderView.Interactive)
+            self.tree.setColumnWidth(0, 680)
+            self.tree.setMinimumWidth(640)
+            self.tree.itemSelectionChanged.connect(self.on_tree_selection)
+            left_layout.addWidget(self.tree)
+            left_frame.setMinimumWidth(640)
 
-        right_frame = QFrame()
-        right_layout = QVBoxLayout(right_frame)
+            right_frame = QFrame()
+            right_layout = QVBoxLayout(right_frame)
 
-        details = QFormLayout()
-        self.company_label = QLabel("-")
-        self.status_label = QLabel("-")
-        self.auto_status_label = QLabel("-")
-        self.date_label = QLabel("-")
-        self.subject_label = QLabel("-")
-        self.file_label = QLabel("-")
-        self.role_label = QLabel("-")
-        self.location_label = QLabel("-")
-        self.link_state_label = QLabel("-")
+            details = QFormLayout()
+            self.company_label = QLabel("-")
+            self.status_label = QLabel("-")
+            self.auto_status_label = QLabel("-")
+            self.date_label = QLabel("-")
+            self.subject_label = QLabel("-")
+            self.file_label = QLabel("-")
+            self.role_label = QLabel("-")
+            self.location_label = QLabel("-")
+            self.link_state_label = QLabel("-")
 
-        details.addRow("Company:", self.company_label)
-        details.addRow("Status:", self.status_label)
-        details.addRow("Auto status:", self.auto_status_label)
-        details.addRow("Date:", self.date_label)
-        details.addRow("Subject:", self.subject_label)
-        details.addRow("Должность:", self.role_label)
-        details.addRow("Локация:", self.location_label)
-        details.addRow("File:", self.file_label)
-        details.addRow("Job link:", self.link_state_label)
-        right_layout.addLayout(details)
+            details.addRow("Company:", self.company_label)
+            details.addRow("Status:", self.status_label)
+            details.addRow("Auto status:", self.auto_status_label)
+            details.addRow("Date:", self.date_label)
+            details.addRow("Subject:", self.subject_label)
+            details.addRow("Должность:", self.role_label)
+            details.addRow("Локация:", self.location_label)
+            details.addRow("File:", self.file_label)
+            details.addRow("Job link:", self.link_state_label)
+            right_layout.addLayout(details)
 
-        controls_layout = QVBoxLayout()
-        controls_row_1 = QHBoxLayout()
-        controls_row_2 = QHBoxLayout()
+            controls_layout = QVBoxLayout()
+            controls_row_1 = QHBoxLayout()
+            controls_row_2 = QHBoxLayout()
 
-        manual_move_order = ["applied", "interview", "rejected", "manual_sort", "archive"]
-        for status in manual_move_order:
-            btn = QPushButton(f"Move to {STATUS_TITLE[status]}")
-            btn.clicked.connect(lambda _checked=False, s=status: self.set_status(s))
-            controls_row_1.addWidget(btn)
+            manual_move_order = ["applied", "interview", "rejected", "manual_sort", "archive"]
+            for status in manual_move_order:
+                btn = QPushButton(f"Move to {STATUS_TITLE[status]}")
+                btn.clicked.connect(lambda _checked=False, s=status: self.set_status(s))
+                controls_row_1.addWidget(btn)
 
-        clear_btn = QPushButton("Reset to Auto")
-        clear_btn.clicked.connect(lambda: self.set_status(None))
-        controls_row_2.addWidget(clear_btn)
+            clear_btn = QPushButton("Reset to Auto")
+            clear_btn.clicked.connect(lambda: self.set_status(None))
+            controls_row_2.addWidget(clear_btn)
 
-        self.open_source_btn = QPushButton("Open Source File")
-        self.open_source_btn.clicked.connect(self.open_source_file)
-        controls_row_2.addWidget(self.open_source_btn)
+            self.open_source_btn = QPushButton("Open Source File")
+            self.open_source_btn.clicked.connect(self.open_source_file)
+            controls_row_2.addWidget(self.open_source_btn)
 
-        self.open_job_btn = QPushButton("Open Job Link")
-        self.open_job_btn.clicked.connect(self.open_job_link)
-        self.open_job_btn.setEnabled(False)
-        controls_row_2.addWidget(self.open_job_btn)
-        controls_row_2.addStretch(1)
-
-        controls_layout.addLayout(controls_row_1)
-        controls_layout.addLayout(controls_row_2)
-        right_layout.addLayout(controls_layout)
-
-        self.about_job_text = QTextEdit()
-        self.about_job_text.setReadOnly(True)
-        right_layout.addWidget(self.about_job_text)
-
-        splitter.addWidget(left_frame)
-        splitter.addWidget(right_frame)
-        splitter.setSizes([700, 860])
-        splitter.setStretchFactor(0, 2)
-        splitter.setStretchFactor(1, 3)
-
-        self.status_bar_label = QLabel("Ready")
-        right_layout.addWidget(self.status_bar_label)
-
-        self.setCentralWidget(main)
-
-    def show_error(self, title: str, message: str) -> None:
-        QMessageBox.critical(self, title, message)
-
-    @staticmethod
-    def resolve_rclone_bin() -> Optional[str]:
-        env_bin = os.getenv("RCLONE_BIN", "").strip()
-        candidates = [
-            env_bin,
-            shutil.which("rclone") or "",
-            "/opt/homebrew/bin/rclone",
-            "/usr/local/bin/rclone",
-            "/usr/bin/rclone",
-        ]
-        for candidate in candidates:
-            if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
-                return candidate
-        return None
-
-    def sync_source(self) -> None:
-        source = Path(self.source_input.text().strip()).expanduser()
-        if not source.exists() or not source.is_dir():
-            self.show_error("Invalid source", f"Directory not found:\n{source}")
-            return
-
-        try:
-            self.db.snapshot_non_incoming_statuses()
-            scanned, removed = self.db.sync_source_dir(source)
-        except Exception as exc:
-            self.show_error("Sync failed", str(exc))
-            return
-
-        self.source_dir = source
-        self.status_bar_label.setText(f"Synced: {scanned} files, removed: {removed}")
-        self.reload_tree()
-
-    def sync_drive_and_source(self) -> None:
-        source = Path(self.source_input.text().strip()).expanduser()
-        source.mkdir(parents=True, exist_ok=True)
-        rclone_bin = self.resolve_rclone_bin()
-        if not rclone_bin:
-            self.show_error(
-                "Drive sync failed",
-                "rclone is not installed or not found. "
-                "Expected one of: /opt/homebrew/bin/rclone, /usr/local/bin/rclone, or PATH.",
-            )
-            return
-
-        self.status_bar_label.setText("Syncing Google Drive...")
-        QApplication.processEvents()
-        try:
-            result = subprocess.run(
-                [
-                    rclone_bin,
-                    "copy",
-                    f"{DRIVE_REMOTE}:",
-                    str(source),
-                    "--drive-root-folder-id",
-                    DRIVE_FOLDER_ID,
-                    "--create-empty-src-dirs",
-                    "--transfers",
-                    "4",
-                    "--checkers",
-                    "8",
-                ],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-        except FileNotFoundError:
-            self.show_error("Drive sync failed", f"Cannot execute rclone binary: {rclone_bin}")
-            return
-
-        if result.returncode != 0:
-            error_text = (result.stderr or result.stdout or "Unknown rclone error").strip()
-            self.show_error("Drive sync failed", error_text[-4000:])
-            return
-
-        try:
-            self.db.snapshot_non_incoming_statuses()
-            scanned, removed = self.db.sync_source_dir(source)
-        except Exception as exc:
-            self.show_error("Sync failed", str(exc))
-            return
-
-        self.source_dir = source
-        self.status_bar_label.setText(f"Drive + DB synced: {scanned} files, removed: {removed}")
-        self.reload_tree()
-
-    def reset_db_and_sync(self) -> None:
-        confirm = QMessageBox.question(
-            self,
-            "Reset database",
-            "Delete all records from SQL and reload from source folder?",
-        )
-        if confirm != QMessageBox.Yes:
-            return
-        try:
-            self.db.snapshot_non_incoming_statuses()
-            self.db.reset_all()
-        except Exception as exc:
-            self.show_error("Reset failed", str(exc))
-            return
-        self.status_bar_label.setText("Database reset. Running full sync...")
-        self.sync_source()
-
-    def reload_tree(self) -> None:
-        previous_id = self.selected_app_id
-        self.tree.clear()
-        counts = self.db.get_status_counts()
-
-        for status in STATUS_ORDER:
-            section = QTreeWidgetItem([f"{STATUS_TITLE[status]} ({counts[status]})"])
-            section.setData(0, Qt.UserRole, ("group", status))
-            self.tree.addTopLevelItem(section)
-
-            items = self.db.get_by_status(status)
-            for app in items:
-                caption = f"{app.company}"
-                if app.role:
-                    caption = f"{caption} | {app.role}"
-                if app.location:
-                    caption = f"{caption} | {app.location}"
-                child = QTreeWidgetItem([caption])
-                child.setToolTip(0, app.subject or app.file_name)
-                child.setData(0, Qt.UserRole, ("app", app.id))
-                section.addChild(child)
-
-            section.setExpanded(True)
-
-        if previous_id is not None:
-            self.select_app(previous_id)
-
-    def select_app(self, app_id: int) -> None:
-        root = self.tree.invisibleRootItem()
-        for i in range(root.childCount()):
-            group = root.child(i)
-            for j in range(group.childCount()):
-                child = group.child(j)
-                data = child.data(0, Qt.UserRole)
-                if data and data[0] == "app" and data[1] == app_id:
-                    self.tree.setCurrentItem(child)
-                    return
-
-    @staticmethod
-    def format_date(date_raw: str) -> str:
-        try:
-            return datetime.strptime(date_raw, "%Y-%m-%d").strftime("%d.%m.%Y")
-        except Exception:
-            return date_raw
-
-    def on_tree_selection(self) -> None:
-        item = self.tree.currentItem()
-        if not item:
-            return
-
-        data = item.data(0, Qt.UserRole)
-        if not data or data[0] != "app":
-            self.selected_app_id = None
-            self.company_label.setText("-")
-            self.status_label.setText("-")
-            self.auto_status_label.setText("-")
-            self.date_label.setText("-")
-            self.subject_label.setText("-")
-            self.role_label.setText("-")
-            self.location_label.setText("-")
-            self.file_label.setText("-")
-            self.link_state_label.setText("-")
+            self.open_job_btn = QPushButton("Open Job Link")
+            self.open_job_btn.clicked.connect(self.open_job_link)
             self.open_job_btn.setEnabled(False)
-            self.about_job_text.setPlainText("")
-            return
+            controls_row_2.addWidget(self.open_job_btn)
+            controls_row_2.addStretch(1)
 
-        app_id = int(data[1])
-        app = self.db.get_by_id(app_id)
-        if not app:
-            return
+            controls_layout.addLayout(controls_row_1)
+            controls_layout.addLayout(controls_row_2)
+            right_layout.addLayout(controls_layout)
 
-        self.selected_app_id = app_id
-        status_title = STATUS_TITLE.get(app.current_status, app.current_status)
-        auto_title = STATUS_TITLE.get(app.auto_status, app.auto_status)
+            self.about_job_text = QTextEdit()
+            self.about_job_text.setReadOnly(True)
+            right_layout.addWidget(self.about_job_text)
 
-        self.company_label.setText(app.company)
-        self.status_label.setText(status_title)
-        self.auto_status_label.setText(auto_title)
-        self.date_label.setText(self.format_date(app.email_date))
-        self.subject_label.setText(app.subject or "-")
-        self.role_label.setText(app.role or "-")
-        self.location_label.setText(app.location or "-")
-        self.file_label.setText(app.file_name)
-        self.link_state_label.setText("Available" if app.link_url else "Not found")
-        self.open_job_btn.setEnabled(bool(app.link_url))
-        self.about_job_text.setPlainText("Loading About the job...")
-        QApplication.processEvents()
+            splitter.addWidget(left_frame)
+            splitter.addWidget(right_frame)
+            splitter.setSizes([700, 860])
+            splitter.setStretchFactor(0, 2)
+            splitter.setStretchFactor(1, 3)
 
-        about_text = app.about_job_text
-        if not about_text:
+            self.status_bar_label = QLabel("Ready")
+            right_layout.addWidget(self.status_bar_label)
+
+            self.setCentralWidget(main)
+
+        def show_error(self, title: str, message: str) -> None:
+            QMessageBox.critical(self, title, message)
+
+        @staticmethod
+        def resolve_rclone_bin() -> Optional[str]:
+            env_bin = os.getenv("RCLONE_BIN", "").strip()
+            candidates = [
+                env_bin,
+                shutil.which("rclone") or "",
+                "/opt/homebrew/bin/rclone",
+                "/usr/local/bin/rclone",
+                "/usr/bin/rclone",
+            ]
+            for candidate in candidates:
+                if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+                    return candidate
+            return None
+
+        def sync_source(self) -> None:
+            source = Path(self.source_input.text().strip()).expanduser()
+            if not source.exists() or not source.is_dir():
+                self.show_error("Invalid source", f"Directory not found:\n{source}")
+                return
+
             try:
-                about_text = self.db.ensure_about_job_text(app.id)
+                self.db.snapshot_non_incoming_statuses()
+                scanned, removed = self.db.sync_source_dir(source)
             except Exception as exc:
-                about_text = f"Failed to load About the job: {exc}"
-        self.about_job_text.setPlainText(about_text)
+                self.show_error("Sync failed", str(exc))
+                return
 
-        mode = "manual" if app.manual_status else "auto"
-        self.status_bar_label.setText(f"Selected #{app.id} ({mode})")
+            self.source_dir = source
+            self.status_bar_label.setText(f"Synced: {scanned} files, removed: {removed}")
+            self.reload_tree()
 
-    def set_status(self, status: Optional[str]) -> None:
-        if self.selected_app_id is None:
-            self.show_error("No selection", "Select an application first.")
-            return
-        try:
-            self.db.set_manual_status(self.selected_app_id, status)
-        except Exception as exc:
-            self.show_error("Update failed", str(exc))
-            return
+        def sync_drive_and_source(self) -> None:
+            source = Path(self.source_input.text().strip()).expanduser()
+            source.mkdir(parents=True, exist_ok=True)
+            rclone_bin = self.resolve_rclone_bin()
+            if not rclone_bin:
+                self.show_error(
+                    "Drive sync failed",
+                    "rclone is not installed or not found. "
+                    "Expected one of: /opt/homebrew/bin/rclone, /usr/local/bin/rclone, or PATH.",
+                )
+                return
 
-        self.reload_tree()
-        if self.selected_app_id is not None:
-            self.select_app(self.selected_app_id)
+            self.status_bar_label.setText("Syncing Google Drive...")
+            QApplication.processEvents()
+            try:
+                result = subprocess.run(
+                    [
+                        rclone_bin,
+                        "copy",
+                        f"{DRIVE_REMOTE}:",
+                        str(source),
+                        "--drive-root-folder-id",
+                        DRIVE_FOLDER_ID,
+                        "--create-empty-src-dirs",
+                        "--transfers",
+                        "4",
+                        "--checkers",
+                        "8",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+            except FileNotFoundError:
+                self.show_error("Drive sync failed", f"Cannot execute rclone binary: {rclone_bin}")
+                return
 
-    def open_source_file(self) -> None:
-        if self.selected_app_id is None:
-            self.show_error("No selection", "Select an application first.")
-            return
-        app = self.db.get_by_id(self.selected_app_id)
-        if not app:
-            self.show_error("Missing application", "Record no longer exists.")
-            return
+            if result.returncode != 0:
+                error_text = (result.stderr or result.stdout or "Unknown rclone error").strip()
+                self.show_error("Drive sync failed", error_text[-4000:])
+                return
 
-        path = app.source_file
-        if not os.path.exists(path):
-            self.show_error("File not found", path)
-            return
+            try:
+                self.db.snapshot_non_incoming_statuses()
+                scanned, removed = self.db.sync_source_dir(source)
+            except Exception as exc:
+                self.show_error("Sync failed", str(exc))
+                return
 
-        if sys.platform == "darwin":
-            subprocess.run(["open", path], check=False)
-        elif os.name == "nt":
-            os.startfile(path)  # type: ignore[attr-defined]
-        else:
-            subprocess.run(["xdg-open", path], check=False)
+            self.source_dir = source
+            self.status_bar_label.setText(f"Drive + DB synced: {scanned} files, removed: {removed}")
+            self.reload_tree()
 
-    def open_job_link(self) -> None:
-        if self.selected_app_id is None:
-            self.show_error("No selection", "Select an application first.")
-            return
-        app = self.db.get_by_id(self.selected_app_id)
-        if not app:
-            self.show_error("Missing application", "Record no longer exists.")
-            return
-        if not app.link_url:
-            self.show_error("No link", "No LinkedIn job link found in selected email.")
-            return
+        def reset_db_and_sync(self) -> None:
+            confirm = QMessageBox.question(
+                self,
+                "Reset database",
+                "Delete all records from SQL and reload from source folder?",
+            )
+            if confirm != QMessageBox.Yes:
+                return
+            try:
+                self.db.snapshot_non_incoming_statuses()
+                self.db.reset_all()
+            except Exception as exc:
+                self.show_error("Reset failed", str(exc))
+                return
+            self.status_bar_label.setText("Database reset. Running full sync...")
+            self.sync_source()
 
-        if sys.platform == "darwin":
-            subprocess.run(["open", app.link_url], check=False)
-        elif os.name == "nt":
-            os.startfile(app.link_url)  # type: ignore[attr-defined]
-        else:
-            subprocess.run(["xdg-open", app.link_url], check=False)
+        def reload_tree(self) -> None:
+            previous_id = self.selected_app_id
+            self.tree.clear()
+            counts = self.db.get_status_counts()
+
+            for status in STATUS_ORDER:
+                section = QTreeWidgetItem([f"{STATUS_TITLE[status]} ({counts[status]})"])
+                section.setData(0, Qt.UserRole, ("group", status))
+                self.tree.addTopLevelItem(section)
+
+                items = self.db.get_by_status(status)
+                for app in items:
+                    caption = f"{app.company}"
+                    if app.role:
+                        caption = f"{caption} | {app.role}"
+                    if app.location:
+                        caption = f"{caption} | {app.location}"
+                    child = QTreeWidgetItem([caption])
+                    child.setToolTip(0, app.subject or app.file_name)
+                    child.setData(0, Qt.UserRole, ("app", app.id))
+                    section.addChild(child)
+
+                section.setExpanded(True)
+
+            if previous_id is not None:
+                self.select_app(previous_id)
+
+        def select_app(self, app_id: int) -> None:
+            root = self.tree.invisibleRootItem()
+            for i in range(root.childCount()):
+                group = root.child(i)
+                for j in range(group.childCount()):
+                    child = group.child(j)
+                    data = child.data(0, Qt.UserRole)
+                    if data and data[0] == "app" and data[1] == app_id:
+                        self.tree.setCurrentItem(child)
+                        return
+
+        @staticmethod
+        def format_date(date_raw: str) -> str:
+            try:
+                return datetime.strptime(date_raw, "%Y-%m-%d").strftime("%d.%m.%Y")
+            except Exception:
+                return date_raw
+
+        def on_tree_selection(self) -> None:
+            item = self.tree.currentItem()
+            if not item:
+                return
+
+            data = item.data(0, Qt.UserRole)
+            if not data or data[0] != "app":
+                self.selected_app_id = None
+                self.company_label.setText("-")
+                self.status_label.setText("-")
+                self.auto_status_label.setText("-")
+                self.date_label.setText("-")
+                self.subject_label.setText("-")
+                self.role_label.setText("-")
+                self.location_label.setText("-")
+                self.file_label.setText("-")
+                self.link_state_label.setText("-")
+                self.open_job_btn.setEnabled(False)
+                self.about_job_text.setPlainText("")
+                return
+
+            app_id = int(data[1])
+            app = self.db.get_by_id(app_id)
+            if not app:
+                return
+
+            self.selected_app_id = app_id
+            status_title = STATUS_TITLE.get(app.current_status, app.current_status)
+            auto_title = STATUS_TITLE.get(app.auto_status, app.auto_status)
+
+            self.company_label.setText(app.company)
+            self.status_label.setText(status_title)
+            self.auto_status_label.setText(auto_title)
+            self.date_label.setText(self.format_date(app.email_date))
+            self.subject_label.setText(app.subject or "-")
+            self.role_label.setText(app.role or "-")
+            self.location_label.setText(app.location or "-")
+            self.file_label.setText(app.file_name)
+            self.link_state_label.setText("Available" if app.link_url else "Not found")
+            self.open_job_btn.setEnabled(bool(app.link_url))
+            self.about_job_text.setPlainText("Loading About the job...")
+            QApplication.processEvents()
+
+            about_text = app.about_job_text
+            if not about_text:
+                try:
+                    about_text = self.db.ensure_about_job_text(app.id)
+                except Exception as exc:
+                    about_text = f"Failed to load About the job: {exc}"
+            self.about_job_text.setPlainText(about_text)
+
+            mode = "manual" if app.manual_status else "auto"
+            self.status_bar_label.setText(f"Selected #{app.id} ({mode})")
+
+        def set_status(self, status: Optional[str]) -> None:
+            if self.selected_app_id is None:
+                self.show_error("No selection", "Select an application first.")
+                return
+            try:
+                self.db.set_manual_status(self.selected_app_id, status)
+            except Exception as exc:
+                self.show_error("Update failed", str(exc))
+                return
+
+            self.reload_tree()
+            if self.selected_app_id is not None:
+                self.select_app(self.selected_app_id)
+
+        def open_source_file(self) -> None:
+            if self.selected_app_id is None:
+                self.show_error("No selection", "Select an application first.")
+                return
+            app = self.db.get_by_id(self.selected_app_id)
+            if not app:
+                self.show_error("Missing application", "Record no longer exists.")
+                return
+
+            path = app.source_file
+            if not os.path.exists(path):
+                self.show_error("File not found", path)
+                return
+
+            if sys.platform == "darwin":
+                subprocess.run(["open", path], check=False)
+            elif os.name == "nt":
+                os.startfile(path)  # type: ignore[attr-defined]
+            else:
+                subprocess.run(["xdg-open", path], check=False)
+
+        def open_job_link(self) -> None:
+            if self.selected_app_id is None:
+                self.show_error("No selection", "Select an application first.")
+                return
+            app = self.db.get_by_id(self.selected_app_id)
+            if not app:
+                self.show_error("Missing application", "Record no longer exists.")
+                return
+            if not app.link_url:
+                self.show_error("No link", "No LinkedIn job link found in selected email.")
+                return
+
+            if sys.platform == "darwin":
+                subprocess.run(["open", app.link_url], check=False)
+            elif os.name == "nt":
+                os.startfile(app.link_url)  # type: ignore[attr-defined]
+            else:
+                subprocess.run(["xdg-open", app.link_url], check=False)
 
 
 def parse_args() -> argparse.Namespace:
@@ -1747,7 +1750,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--db",
-        default=str(Path.home() / ".local" / "share" / "linkedin_apps" / "applications.db"),
+        default=str(DEFAULT_DB_PATH),
         help="SQLite database file path.",
     )
     return parser.parse_args()
@@ -1756,6 +1759,12 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     source_dir = Path(args.source_dir).expanduser().resolve()
+    if not GUI_AVAILABLE:
+        print("PySide6 is required for GUI mode.")
+        print("Install with: python3 -m pip install PySide6")
+        if GUI_IMPORT_ERROR is not None:
+            print(f"Import error: {GUI_IMPORT_ERROR}")
+        raise SystemExit(1)
 
     app = QApplication(sys.argv)
     db = ApplicationsDB(args.db)
